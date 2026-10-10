@@ -1,5 +1,6 @@
 import * as db from "../db.js";
 import { confirmDialog, showToast } from "../ui.js";
+import * as drive from "../driveBackup.js";
 import { hasUnfinishedSession } from "./workout.js";
 
 function formatTime(totalSeconds) {
@@ -8,9 +9,21 @@ function formatTime(totalSeconds) {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
+function formatBackupTime(date) {
+  if (!date) return "";
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function renderHome(container, { navigateTo }) {
   const stats = db.getWeekStats();
   const resuming = hasUnfinishedSession();
+  const driveConnected = drive.isConnected();
 
   container.innerHTML = `
     <h1>endokalos</h1>
@@ -37,7 +50,34 @@ export function renderHome(container, { navigateTo }) {
       <button class="btn btn-secondary" style="flex: 1;" id="go-routines">Routines</button>
     </div>
 
-    <button class="btn-text" id="import-backup" style="display:block;margin:20px auto 0;">Import backup</button>
+    <div class="section" style="margin-top: 20px;">
+      <div class="section-title">Backup</div>
+      ${
+        driveConnected
+          ? `
+            <div class="row">
+              <div style="flex:1;">
+                <div>Google Drive connected</div>
+                <div style="color:var(--color-text-secondary);font-size:12px;" id="last-backup-text">
+                  ${drive.lastBackupTime() ? `Last backup ${formatBackupTime(drive.lastBackupTime())}` : "Not backed up yet"}
+                </div>
+              </div>
+              <button class="btn btn-secondary" id="backup-now">Back Up Now</button>
+            </div>
+            <button class="btn-text" id="disconnect-drive" style="margin-top:8px;padding:0;">Disconnect</button>
+          `
+          : `
+            <div class="row">
+              <div style="flex:1;color:var(--color-text-secondary);font-size:13px;">
+                Automatically keep a copy of your data in Google Drive.
+              </div>
+              <button class="btn btn-secondary" id="connect-drive">Connect Drive</button>
+            </div>
+          `
+      }
+    </div>
+
+    <button class="btn-text" id="import-backup" style="display:block;margin:12px auto 0;">Import backup</button>
     <input type="file" id="import-file-input" accept=".db,.sqlite,.sqlite3" style="display:none;" />
   `;
 
@@ -45,6 +85,49 @@ export function renderHome(container, { navigateTo }) {
   container.querySelector("#go-nutrition").addEventListener("click", () => navigateTo("nutrition"));
   container.querySelector("#go-progress").addEventListener("click", () => navigateTo("progress"));
   container.querySelector("#go-routines").addEventListener("click", () => navigateTo("routines"));
+
+  if (driveConnected) {
+    container.querySelector("#backup-now").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Backing up...";
+      try {
+        await drive.backupNow(db.exportBytes());
+        showToast("Backed up to Drive", "success");
+        navigateTo("home");
+      } catch (err) {
+        showToast(err.message || "Backup failed.", "error");
+        btn.disabled = false;
+        btn.textContent = "Back Up Now";
+      }
+    });
+
+    container.querySelector("#disconnect-drive").addEventListener("click", async () => {
+      const ok = await confirmDialog({
+        title: "Disconnect Google Drive?",
+        message: "Stops automatic backups. Your existing backup file in Drive is left as-is.",
+        confirmText: "Disconnect",
+      });
+      if (!ok) return;
+      drive.disconnect();
+      navigateTo("home");
+    });
+  } else {
+    container.querySelector("#connect-drive").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Connecting...";
+      try {
+        await drive.connectAndBackup(db.exportBytes());
+        showToast("Connected and backed up", "success");
+        navigateTo("home");
+      } catch (err) {
+        showToast(err.message || "Couldn't connect to Drive.", "error");
+        btn.disabled = false;
+        btn.textContent = "Connect Drive";
+      }
+    });
+  }
 
   const fileInput = container.querySelector("#import-file-input");
   container.querySelector("#import-backup").addEventListener("click", async () => {

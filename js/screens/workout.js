@@ -3,6 +3,7 @@ import { confirmDialog, showToast } from "../ui.js";
 import { openExercisePicker } from "../components/exercisePicker.js";
 import { openRoutinePicker } from "../components/routinePicker.js";
 import { openSessionSummaryDialog } from "../components/sessionSummaryDialog.js";
+import * as drive from "../driveBackup.js";
 
 const REST_SECONDS = 90;
 const REST_TIMER_KEY = "endokalos-rest-timer-end"; // localStorage: an end timestamp (ms)
@@ -425,6 +426,15 @@ function finishWorkout(container, navigateTo) {
     resetSessionState(container);
     navigateTo("home");
     showToast("Workout saved", "success");
+
+    // Best-effort, silent -- a failed background backup shouldn't interrupt
+    // or alarm the user right after a successful save. They can always
+    // retry from Home, where a real failure would also show up.
+    if (drive.isConnected()) {
+      drive.backupNow(db.exportBytes()).catch((err) => {
+        console.warn("Drive auto-backup failed:", err);
+      });
+    }
   });
 }
 

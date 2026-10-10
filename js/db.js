@@ -150,6 +150,13 @@ async function loadPersistedBytes() {
   });
 }
 
+/** Raw SQLite file bytes for the current database -- used by the Drive
+ * backup feature and the Export/Import flows, which all just move this
+ * same byte array around rather than reading/writing individual rows. */
+export function exportBytes() {
+  return db.export();
+}
+
 export async function persist() {
   const bytes = db.export();
   const meta = await openMetaDb();
