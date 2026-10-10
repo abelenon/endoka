@@ -64,7 +64,10 @@ export function renderHome(container, { navigateTo }) {
               </div>
               <button class="btn btn-secondary" id="backup-now">Back Up Now</button>
             </div>
-            <button class="btn-text" id="disconnect-drive" style="margin-top:8px;padding:0;">Disconnect</button>
+            <div class="row" style="margin-top:8px;gap:16px;">
+              <button class="btn-text" id="restore-drive" style="padding:0;">Restore from Drive</button>
+              <button class="btn-text" id="disconnect-drive" style="padding:0;">Disconnect</button>
+            </div>
           `
           : `
             <div class="row">
@@ -77,7 +80,7 @@ export function renderHome(container, { navigateTo }) {
       }
     </div>
 
-    <button class="btn-text" id="import-backup" style="display:block;margin:12px auto 0;">Import backup</button>
+    <button class="btn-text" id="import-backup" style="display:block;margin:12px auto 0;">Import from file</button>
     <input type="file" id="import-file-input" accept=".db,.sqlite,.sqlite3" style="display:none;" />
   `;
 
@@ -99,6 +102,30 @@ export function renderHome(container, { navigateTo }) {
         showToast(err.message || "Backup failed.", "error");
         btn.disabled = false;
         btn.textContent = "Back Up Now";
+      }
+    });
+
+    container.querySelector("#restore-drive").addEventListener("click", async (e) => {
+      const ok = await confirmDialog({
+        title: "Restore from Drive?",
+        message: "This replaces everything currently in this app with your latest Drive backup. This can't be undone.",
+        confirmText: "Restore",
+        danger: true,
+      });
+      if (!ok) return;
+
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Restoring...";
+      try {
+        const bytes = await drive.fetchBackupBytes();
+        await db.importDatabaseBackup(bytes);
+        showToast("Restored from Drive", "success");
+        navigateTo("home");
+      } catch (err) {
+        showToast(err.message || "Restore failed.", "error");
+        btn.disabled = false;
+        btn.textContent = "Restore from Drive";
       }
     });
 

@@ -1,7 +1,7 @@
 // Cache-first app shell so the PWA works fully offline after first load.
 // Bump CACHE_NAME whenever any cached file changes so clients pick up the
 // new version instead of serving stale files forever.
-const CACHE_NAME = "endokalos-shell-v5";
+const CACHE_NAME = "endokalos-shell-v6";
 
 const SHELL_FILES = [
   "./",
@@ -13,6 +13,7 @@ const SHELL_FILES = [
   "js/db.js",
   "js/ui.js",
   "js/driveBackup.js",
+  "js/nutritionExport.js",
   "js/screens/home.js",
   "js/screens/workout.js",
   "js/screens/nutrition.js",

@@ -1,5 +1,6 @@
 import * as db from "../db.js";
 import { showToast } from "../ui.js";
+import { exportNutritionPdf } from "../nutritionExport.js";
 
 function toLocalDateInputValue(date) {
   const y = date.getFullYear();
@@ -37,7 +38,7 @@ export function renderNutrition(container, { navigateTo }) {
       <button class="icon-btn" id="go-home">←</button>
       <h1 style="margin: 0 0 0 4px;">Nutrition</h1>
       <div class="spacer"></div>
-      <button class="btn-text" id="export-csv">Export</button>
+      <button class="btn-text" id="export-pdf">Export</button>
     </div>
     <div class="row" style="justify-content:center;align-items:center;margin-bottom:18px;">
       <button class="icon-btn" id="date-prev">‹</button>
@@ -150,22 +151,23 @@ export function renderNutrition(container, { navigateTo }) {
     refresh();
   });
 
-  container.querySelector("#export-csv").addEventListener("click", () => {
+  container.querySelector("#export-pdf").addEventListener("click", async (e) => {
     const logs = db.getAllNutritionLogs();
     if (!logs.length) {
       showToast("No nutrition logs to export yet.", "warning");
       return;
     }
-    const header = "date,calories,protein,fat,weight";
-    const rows = logs.map((l) => [l.date, l.calories ?? "", l.protein ?? "", l.fat ?? "", l.weight ?? ""].join(","));
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `endokalos-nutrition-${toLocalDateInputValue(new Date())}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "Exporting...";
+    try {
+      await exportNutritionPdf(logs);
+    } catch (err) {
+      showToast(err.message || "Couldn't export the PDF.", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Export";
+    }
   });
 
   refresh();

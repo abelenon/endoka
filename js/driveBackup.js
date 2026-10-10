@@ -115,6 +115,37 @@ export async function backupNow(dbBytes) {
   localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
 }
 
+/** Downloads the current Drive backup file's bytes directly -- no file
+ * picker, mirrors backupNow()'s "just talk to Drive" flow in reverse.
+ * Only meaningful once connected (there's a file id to fetch). */
+export async function fetchBackupBytes() {
+  const fileId = localStorage.getItem(DRIVE_FILE_ID_KEY);
+  if (!fileId) {
+    throw new Error("Not connected to Drive yet.");
+  }
+  if (!accessToken) {
+    await requestAccessToken({ silent: true });
+  }
+
+  let response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (response.status === 401) {
+    accessToken = null;
+    await requestAccessToken({ silent: true });
+    response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`Drive download failed (${response.status})`);
+  }
+  return response.arrayBuffer();
+}
+
 export function disconnect() {
   if (accessToken && window.google?.accounts?.oauth2?.revoke) {
     window.google.accounts.oauth2.revoke(accessToken, () => {});
