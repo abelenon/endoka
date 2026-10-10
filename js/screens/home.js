@@ -20,6 +20,18 @@ function formatBackupTime(date) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** Restore/Import both wipe the whole database, including any workout
+ * mid-flight. Rather than just scaring the user with a confirm dialog they
+ * might click through on autopilot, block the action outright while a
+ * session is active and send them to resolve it first. Returns true if the
+ * caller should stop (a toast was already shown). */
+function blockIfUnfinishedSession(navigateTo) {
+  if (!hasUnfinishedSession()) return false;
+  showToast("Finish or discard your current workout first -- this would erase it.", "warning");
+  navigateTo("workout");
+  return true;
+}
+
 export function renderHome(container, { navigateTo }) {
   const stats = db.getWeekStats();
   const resuming = hasUnfinishedSession();
@@ -114,6 +126,7 @@ export function renderHome(container, { navigateTo }) {
     });
 
     container.querySelector("#restore-drive").addEventListener("click", async (e) => {
+      if (blockIfUnfinishedSession(navigateTo)) return;
       const ok = await confirmDialog({
         title: "Restore from Drive?",
         message: "This replaces everything currently in this app with your latest Drive backup. This can't be undone.",
@@ -166,6 +179,7 @@ export function renderHome(container, { navigateTo }) {
 
   const fileInput = container.querySelector("#import-file-input");
   container.querySelector("#import-backup").addEventListener("click", async () => {
+    if (blockIfUnfinishedSession(navigateTo)) return;
     const ok = await confirmDialog({
       title: "Import backup?",
       message: "This replaces everything currently in this app with the contents of the backup file. This can't be undone.",
