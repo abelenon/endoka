@@ -28,7 +28,7 @@ function ensureTokenClient() {
   return tokenClient;
 }
 
-function requestAccessToken({ silent } = {}) {
+function requestAccessTokenRaw(prompt) {
   return new Promise((resolve, reject) => {
     const client = ensureTokenClient();
     client.callback = (response) => {
@@ -39,8 +39,34 @@ function requestAccessToken({ silent } = {}) {
       accessToken = response.access_token;
       resolve(accessToken);
     };
-    client.requestAccessToken({ prompt: silent ? "none" : "consent" });
+    client.requestAccessToken({ prompt });
   });
+}
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
+/** Gets a usable access token: tries a silent (no popup) refresh first,
+ * which works in Chrome via its existing Google session, then falls back
+ * to an interactive popup if that fails or times out.
+ *
+ * The timeout matters specifically for Safari: its Intelligent Tracking
+ * Prevention blocks the cross-site cookie check the silent flow relies on,
+ * and the request can then just hang with no error ever firing -- so
+ * "restore doesn't work on Safari" was this, not a caching issue. Falling
+ * back after a few seconds, instead of waiting on a promise that may never
+ * resolve, is what actually fixes it there. */
+async function getAccessToken() {
+  if (accessToken) return accessToken;
+  try {
+    return await withTimeout(requestAccessTokenRaw("none"), 3000, "silent token request timed out");
+  } catch {
+    return requestAccessTokenRaw(""); // adaptive -- shows a popup only if actually needed
+  }
 }
 
 export function isConnected() {
@@ -56,7 +82,7 @@ export function lastBackupTime() {
  * initial backup immediately so "Connect" and "it's actually backed up"
  * happen together instead of leaving a connected-but-never-backed-up gap. */
 export async function connectAndBackup(dbBytes) {
-  await requestAccessToken({ silent: false });
+  await requestAccessTokenRaw("consent");
   await backupNow(dbBytes);
 }
 
@@ -64,9 +90,7 @@ export async function connectAndBackup(dbBytes) {
  * updates the existing Drive file in place after the first call, rather
  * than creating a new one every time. */
 export async function backupNow(dbBytes) {
-  if (!accessToken) {
-    await requestAccessToken({ silent: true });
-  }
+  await getAccessToken();
 
   const fileId = localStorage.getItem(DRIVE_FILE_ID_KEY);
   const blob = new Blob([dbBytes], { type: "application/octet-stream" });
@@ -103,7 +127,7 @@ export async function backupNow(dbBytes) {
   if (response.status === 401) {
     // Token expired mid-session -- get a fresh one and retry once.
     accessToken = null;
-    await requestAccessToken({ silent: true });
+    await getAccessToken();
     return backupNow(dbBytes);
   }
   if (!response.ok) {
@@ -123,9 +147,7 @@ export async function fetchBackupBytes() {
   if (!fileId) {
     throw new Error("Not connected to Drive yet.");
   }
-  if (!accessToken) {
-    await requestAccessToken({ silent: true });
-  }
+  await getAccessToken();
 
   let response = await fetch(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -134,7 +156,7 @@ export async function fetchBackupBytes() {
 
   if (response.status === 401) {
     accessToken = null;
-    await requestAccessToken({ silent: true });
+    await getAccessToken();
     response = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
