@@ -431,7 +431,7 @@ function finishWorkout(container, navigateTo) {
     // or alarm the user right after a successful save. They can always
     // retry from Home, where a real failure would also show up.
     if (drive.isConnected()) {
-      drive.backupNow(db.exportBytes()).catch((err) => {
+      drive.backupNow(db.exportBytes(), { interactive: false }).catch((err) => {
         console.warn("Drive auto-backup failed:", err);
       });
     }

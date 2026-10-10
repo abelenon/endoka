@@ -50,23 +50,37 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
-/** Gets a usable access token: tries a silent (no popup) refresh first,
- * which works in Chrome via its existing Google session, then falls back
- * to an interactive popup if that fails or times out.
+/** Background/automatic use only (the post-workout auto-backup) -- tries a
+ * silent, no-popup refresh and just fails if that doesn't work. Never
+ * falls back to an interactive popup itself: see getAccessTokenInteractive
+ * for why chaining the two is actually broken, not just slow. */
+function getAccessTokenSilent() {
+  if (accessToken) return Promise.resolve(accessToken);
+  return withTimeout(requestAccessTokenRaw("none"), 3000, "silent token request timed out");
+}
+
+/** Click-triggered use (Connect/Back Up Now/Restore) -- requests a token
+ * with Google's adaptive prompt, which only shows a popup if actually
+ * needed. Called directly, with no `await` (and so no real delay) before
+ * it, specifically to stay inside the click's user-gesture window.
  *
- * The timeout matters specifically for Safari: its Intelligent Tracking
- * Prevention blocks the cross-site cookie check the silent flow relies on,
- * and the request can then just hang with no error ever firing -- so
- * "restore doesn't work on Safari" was this, not a caching issue. Falling
- * back after a few seconds, instead of waiting on a promise that may never
- * resolve, is what actually fixes it there. */
-async function getAccessToken() {
-  if (accessToken) return accessToken;
-  try {
-    return await withTimeout(requestAccessTokenRaw("none"), 3000, "silent token request timed out");
-  } catch {
-    return requestAccessTokenRaw(""); // adaptive -- shows a popup only if actually needed
-  }
+ * Earlier this tried silent-first-with-a-timeout, then fell back to a
+ * popup on failure. That's what caused "stuck on Backing up... forever"
+ * on Safari: the few seconds spent waiting on the silent attempt used up
+ * the user-gesture window, so by the time the interactive popup was
+ * requested, Safari no longer considered it a direct result of the click
+ * and silently blocked it -- no error, just an unresolved promise. Going
+ * straight to the interactive request, synchronously-ish from the click,
+ * keeps it inside that window so the popup is actually allowed to open.
+ * A generous (not tiny) timeout is still here as a last-resort safety net
+ * against a genuinely stuck popup, not as the primary mechanism. */
+function getAccessTokenInteractive() {
+  if (accessToken) return Promise.resolve(accessToken);
+  return withTimeout(
+    requestAccessTokenRaw(""),
+    120000,
+    "Drive sign-in timed out -- try again."
+  );
 }
 
 export function isConnected() {
@@ -88,9 +102,14 @@ export async function connectAndBackup(dbBytes) {
 
 /** Uploads the given SQLite bytes as the single rolling backup file --
  * updates the existing Drive file in place after the first call, rather
- * than creating a new one every time. */
-export async function backupNow(dbBytes) {
-  await getAccessToken();
+ * than creating a new one every time.
+ *
+ * `interactive: false` (used for the silent post-workout auto-backup) means
+ * "don't ever pop up a sign-in window for this -- just skip it if a cached
+ * token isn't available." `interactive: true` (the default, for the
+ * Back Up Now button) means "this came from a click, a popup is fine." */
+export async function backupNow(dbBytes, { interactive = true } = {}) {
+  await (interactive ? getAccessTokenInteractive() : getAccessTokenSilent());
 
   const fileId = localStorage.getItem(DRIVE_FILE_ID_KEY);
   const blob = new Blob([dbBytes], { type: "application/octet-stream" });
@@ -127,8 +146,8 @@ export async function backupNow(dbBytes) {
   if (response.status === 401) {
     // Token expired mid-session -- get a fresh one and retry once.
     accessToken = null;
-    await getAccessToken();
-    return backupNow(dbBytes);
+    await (interactive ? getAccessTokenInteractive() : getAccessTokenSilent());
+    return backupNow(dbBytes, { interactive });
   }
   if (!response.ok) {
     throw new Error(`Drive upload failed (${response.status})`);
@@ -141,13 +160,14 @@ export async function backupNow(dbBytes) {
 
 /** Downloads the current Drive backup file's bytes directly -- no file
  * picker, mirrors backupNow()'s "just talk to Drive" flow in reverse.
- * Only meaningful once connected (there's a file id to fetch). */
+ * Only meaningful once connected (there's a file id to fetch). Always
+ * click-triggered (the Restore button), so always interactive. */
 export async function fetchBackupBytes() {
   const fileId = localStorage.getItem(DRIVE_FILE_ID_KEY);
   if (!fileId) {
     throw new Error("Not connected to Drive yet.");
   }
-  await getAccessToken();
+  await getAccessTokenInteractive();
 
   let response = await fetch(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -156,7 +176,7 @@ export async function fetchBackupBytes() {
 
   if (response.status === 401) {
     accessToken = null;
-    await getAccessToken();
+    await getAccessTokenInteractive();
     response = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
