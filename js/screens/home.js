@@ -127,6 +127,18 @@ export function renderHome(container, { navigateTo }) {
 
     container.querySelector("#restore-drive").addEventListener("click", async (e) => {
       if (blockIfUnfinishedSession(navigateTo)) return;
+
+      // Get Drive access as the very first thing, directly from this click
+      // -- before the confirm dialog's own, separate click. A popup
+      // requested after an intervening dialog click is too far removed
+      // from "the" user gesture for Safari to reliably allow it.
+      try {
+        await drive.ensureAccessToken();
+      } catch (err) {
+        showToast(err.message || "Couldn't sign in to Drive.", "error");
+        return;
+      }
+
       const ok = await confirmDialog({
         title: "Restore from Drive?",
         message: "This replaces everything currently in this app with your latest Drive backup. This can't be undone.",

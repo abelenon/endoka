@@ -83,6 +83,14 @@ function getAccessTokenInteractive() {
   );
 }
 
+/** Public wrapper so callers that need a Drive access token ahead of some
+ * other UI (like a confirm dialog) can get one as the very first thing
+ * they do on click -- see fetchBackupBytes's caller in home.js for why
+ * that ordering specifically matters on Safari. */
+export function ensureAccessToken() {
+  return getAccessTokenInteractive();
+}
+
 export function isConnected() {
   return !!localStorage.getItem(DRIVE_FILE_ID_KEY);
 }
