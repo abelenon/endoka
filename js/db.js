@@ -189,6 +189,7 @@ export async function importDatabaseBackup(arrayBuffer) {
 
   if (db) db.close();
   db = candidate;
+  pruneEmptyUnfinishedSessions(); // clean up any junk the backup itself carried in
   await persist();
 }
 
@@ -218,6 +219,8 @@ export async function initDb() {
       stmt.run(row);
     }
     stmt.free();
+    await persist();
+  } else if (pruneEmptyUnfinishedSessions()) {
     await persist();
   }
 }
@@ -311,6 +314,21 @@ export async function createSession() {
 
 /** The most recent session with no finished_at, if any -- used on app load
  * to offer resuming an in-progress workout instead of losing it. */
+/** Deletes unfinished sessions with zero exercises -- abandoned "Start
+ * Workout" taps that never got an exercise added (or a stray session
+ * carried in from an old backup/import). There's nothing to resume in
+ * these, and left alone they can win getUnfinishedSession()'s "most
+ * recent unfinished" pick over a real, much newer session -- or just sit
+ * there showing a nonsense multi-week elapsed timer on Home/Workout. */
+function pruneEmptyUnfinishedSessions() {
+  db.run(`
+    DELETE FROM sessions
+    WHERE finished_at IS NULL
+      AND id NOT IN (SELECT DISTINCT session_id FROM session_exercises)
+  `);
+  return db.getRowsModified() > 0;
+}
+
 export function getUnfinishedSession() {
   return queryOne(
     "SELECT * FROM sessions WHERE finished_at IS NULL ORDER BY started_at DESC LIMIT 1"
