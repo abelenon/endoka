@@ -1,0 +1,64 @@
+/*
+  Color roles ported 1:1 from kt/theme.py. Keep these in sync manually if the
+  Kivy app's palette changes -- there's no shared source between the two
+  projects (by design; they're separate apps), so this file is the web app's
+  own single source of truth for color, same role theme.py plays there.
+
+  Roles (unchanged from theme.py):
+    primary   (teal)   -- primary actions, navigation, general progress
+    secondary (cyan)   -- secondary actions, information, selected data
+    accent    (yellow) -- achievements, PRs, milestones, highlights
+    success   (green)  -- completed goals, successful workouts, positive progress
+    warning   (orange) -- attention states, effort/recovery indicators
+    danger    (red)    -- errors, negative states, failed targets
+    purple             -- secondary metrics, specialized stats, advanced insights
+*/
+
+/* Same typeface as the Kivy app (main.py registers these as its default
+   "Roboto" font). Static Regular/Bold instances, not the variable font --
+   see main.py's comment for why (Kivy's text provider can't select
+   variable-font weight axes at runtime; this app just needs two weights
+   anyway, so the same static files work here unchanged). */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("../assets/fonts/BricolageGrotesque-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("../assets/fonts/BricolageGrotesque-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-family: "Bricolage Grotesque", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --color-primary: #218dae;
+  --color-light-cyan: #ddf3f8;
+  --color-secondary: #2bbbd7;
+  --color-accent: #ffd758;
+  --color-accent-soft: #fce59a;
+  --color-success: #45b97c;
+  --color-warning: #f4a340;
+  --color-danger: #e06464;
+  --color-purple: #9b7edb;
+
+  --color-background: #d4f5fa;
+  --color-surface-standard: #f9fcfc;
+  --color-surface: #ffffff;
+  --color-section-tint: #eefbfd;
+
+  --color-text: #16323c;
+  --color-text-secondary: #5d7882;
+  --color-border: #a7c7cd;
+  --color-disabled: #b7ccd3;
+  --color-on-primary: #ffffff;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+}

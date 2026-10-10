@@ -1,0 +1,24 @@
+{
+  "name": "Endokalos",
+  "short_name": "Endokalos",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#d4f5fa",
+  "theme_color": "#218dae",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
