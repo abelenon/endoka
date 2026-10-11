@@ -60,6 +60,7 @@ const SCHEMA_SQL = `
     secondary_muscle TEXT,
     record_type TEXT NOT NULL DEFAULT 'reps_weight',
     is_two_sided INTEGER NOT NULL DEFAULT 0,
+    is_bodyweight INTEGER NOT NULL DEFAULT 0,
     notes TEXT,
     is_custom INTEGER NOT NULL DEFAULT 0
   );
@@ -115,6 +116,21 @@ const SCHEMA_SQL = `
 
 let SQL = null;
 let db = null;
+
+/** CREATE TABLE IF NOT EXISTS (in SCHEMA_SQL above) only matters for a
+ * brand new database -- it's a no-op against a database that already has
+ * the exercises table, so a newly-added column never actually reaches an
+ * existing database without this. Mirrors kt/db.py's own
+ * _migrate_*_column functions: check via PRAGMA table_info, ALTER TABLE
+ * only if missing. Runs against whichever database is passed in, so it
+ * works for both the live app database and a freshly-opened import. */
+function runMigrations(targetDb) {
+  const cols = targetDb.exec("PRAGMA table_info(exercises)")[0];
+  const colNames = cols ? cols.values.map((row) => row[1]) : [];
+  if (!colNames.includes("is_bodyweight")) {
+    targetDb.run("ALTER TABLE exercises ADD COLUMN is_bodyweight INTEGER NOT NULL DEFAULT 0");
+  }
+}
 
 /** 'YYYY-MM-DD' for a Date in the viewer's LOCAL calendar day -- never
  * Date#toISOString().slice(0, 10), which reads the UTC day and silently
@@ -186,6 +202,7 @@ export async function importDatabaseBackup(arrayBuffer) {
 
   candidate.run("PRAGMA foreign_keys = ON");
   candidate.run(SCHEMA_SQL); // CREATE TABLE IF NOT EXISTS -- fills in any tables an older backup predates.
+  runMigrations(candidate); // and any columns a backup from before they existed predates.
 
   if (db) db.close();
   db = candidate;
@@ -209,6 +226,7 @@ export async function initDb() {
   // no-ops while this is off.
   db.run("PRAGMA foreign_keys = ON");
   db.run(SCHEMA_SQL);
+  runMigrations(db);
 
   const isFresh = !existingBytes;
   if (isFresh) {
@@ -278,11 +296,12 @@ export async function addExercise({
   secondaryMuscle = null,
   recordType = "reps_weight",
   isTwoSided = false,
+  isBodyweight = false,
 }) {
   const id = run(
-    `INSERT INTO exercises (name, primary_muscle, secondary_muscle, record_type, is_two_sided, is_custom)
-     VALUES (?, ?, ?, ?, ?, 1)`,
-    [name.trim(), primaryMuscle, secondaryMuscle, recordType, isTwoSided ? 1 : 0]
+    `INSERT INTO exercises (name, primary_muscle, secondary_muscle, record_type, is_two_sided, is_bodyweight, is_custom)
+     VALUES (?, ?, ?, ?, ?, ?, 1)`,
+    [name.trim(), primaryMuscle, secondaryMuscle, recordType, isTwoSided ? 1 : 0, isBodyweight ? 1 : 0]
   );
   await persist();
   return id;
@@ -470,15 +489,36 @@ function volumeAndTimeSeconds(start, end) {
   if (sessions.length) {
     const placeholders = sessions.map(() => "?").join(",");
     const rows = queryAll(
-      `SELECT s.weight, s.reps, e.is_two_sided
+      `SELECT s.weight, s.reps, e.is_two_sided, e.is_bodyweight
        FROM sets s
        JOIN session_exercises se ON s.session_exercise_id = se.id
        JOIN exercises e ON se.exercise_id = e.id
        WHERE se.session_id IN (${placeholders}) AND s.completed = 1`,
       sessions.map((s) => s.id)
     );
+
+    // Looked up once (not per row) -- bodyweight-exercise volume uses
+    // whatever the most recently logged weight was, not "weight on the
+    // day of that particular set", same spirit as everywhere else here
+    // treating nutrition logs as a slowly-changing value.
+    let latestBodyweight = null;
+    if (rows.some((r) => r.is_bodyweight)) {
+      [latestBodyweight] = getLatestWeight();
+    }
+
     for (const row of rows) {
-      if (row.weight != null && row.reps != null) {
+      if (row.reps == null) continue;
+      // A bodyweight exercise still counts even with no added weight
+      // logged (e.g. a reps_only exercise like plain pull-ups has no
+      // weight field at all) -- body weight alone is the load. A
+      // non-bodyweight exercise with nothing logged genuinely has no
+      // weight to count, same as before this feature existed.
+      if (row.is_bodyweight) {
+        if (latestBodyweight == null) continue; // no bodyweight logged yet -- nothing to add
+        const effectiveWeight = (row.weight || 0) + latestBodyweight;
+        const sides = row.is_two_sided ? 2 : 1;
+        volume += effectiveWeight * row.reps * sides;
+      } else if (row.weight != null) {
         const sides = row.is_two_sided ? 2 : 1;
         volume += row.weight * row.reps * sides;
       }

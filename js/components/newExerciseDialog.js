@@ -88,6 +88,7 @@ export function openNewExerciseDialog(onSave) {
   let secondary = null;
   let recordType = "reps_weight";
   let isTwoSided = false;
+  let isBodyweight = false;
 
   const { body, close } = openModal({ title: "New Exercise" });
 
@@ -109,7 +110,9 @@ export function openNewExerciseDialog(onSave) {
       <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:6px;">Record type</div>
       <div id="record-type-slot" style="margin-bottom:12px;"></div>
       <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:6px;">Logging</div>
-      <div id="sided-slot"></div>
+      <div id="sided-slot" style="margin-bottom:12px;"></div>
+      <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:6px;">Bodyweight</div>
+      <div id="bodyweight-slot"></div>
     </div>
     <button class="btn btn-primary" id="save-exercise" style="width:100%;margin-top:4px;">Save Exercise</button>
   `;
@@ -142,6 +145,18 @@ export function openNewExerciseDialog(onSave) {
       }
     )
   );
+  body.querySelector("#bodyweight-slot").appendChild(
+    chipRow(
+      [
+        [false, "No"],
+        [true, "Yes"],
+      ],
+      isBodyweight,
+      (v) => {
+        isBodyweight = v;
+      }
+    )
+  );
 
   const nameInput = body.querySelector("#ex-name");
   nameInput.addEventListener("input", () => {
@@ -169,6 +184,7 @@ export function openNewExerciseDialog(onSave) {
       secondaryMuscle: secondary,
       recordType,
       isTwoSided,
+      isBodyweight,
     });
     close();
     onSave(id, name);
