@@ -100,7 +100,10 @@ export function renderHome(container, { navigateTo }) {
       }
     </div>
 
-    <button class="btn-text" id="import-backup" style="display:block;margin:12px auto 0;">Import from file</button>
+    <div class="row" style="justify-content:center;gap:16px;margin-top:12px;">
+      <button class="btn-text" id="import-backup" style="padding:0;">Import from file</button>
+      <button class="btn-text" id="download-backup" style="padding:0;">Download local data</button>
+    </div>
     <input type="file" id="import-file-input" accept=".db,.sqlite,.sqlite3" style="display:none;" />
   `;
 
@@ -233,6 +236,22 @@ export function renderHome(container, { navigateTo }) {
       console.error("Import backup failed:", err);
       showToast((err && err.message) || "Couldn't start the import.", "error");
     }
+  });
+
+  // Non-destructive -- just a save-to-device of whatever's local right
+  // now, separate from Drive entirely. Mainly here so "what does this
+  // browser actually have locally" can be checked directly, independent
+  // of whether Drive backup/restore have their own problems.
+  container.querySelector("#download-backup").addEventListener("click", () => {
+    const bytes = db.exportBytes();
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    a.download = `endokalos-local-${stamp}.db`;
+    a.click();
+    URL.revokeObjectURL(url);
   });
 
   fileInput.addEventListener("change", async () => {
