@@ -126,37 +126,37 @@ export function renderHome(container, { navigateTo }) {
     });
 
     container.querySelector("#restore-drive").addEventListener("click", async (e) => {
-      if (blockIfUnfinishedSession(navigateTo)) return;
-
-      // Get Drive access as the very first thing, directly from this click
-      // -- before the confirm dialog's own, separate click. A popup
-      // requested after an intervening dialog click is too far removed
-      // from "the" user gesture for Safari to reliably allow it.
-      try {
-        await drive.ensureAccessToken();
-      } catch (err) {
-        showToast(err.message || "Couldn't sign in to Drive.", "error");
-        return;
-      }
-
-      const ok = await confirmDialog({
-        title: "Restore from Drive?",
-        message: "This replaces everything currently in this app with your latest Drive backup. This can't be undone.",
-        confirmText: "Restore",
-        danger: true,
-      });
-      if (!ok) return;
-
       const btn = e.currentTarget;
-      btn.disabled = true;
-      btn.textContent = "Restoring...";
+      // One try/catch around the whole flow -- including the unfinished-
+      // session check -- so ANY failure shows up as a toast instead of the
+      // click silently doing nothing with the real error only visible in
+      // a console we may not have access to (e.g. on a phone).
       try {
+        if (blockIfUnfinishedSession(navigateTo)) return;
+
+        // Get Drive access as the very first thing, directly from this
+        // click -- before the confirm dialog's own, separate click. A
+        // popup requested after an intervening dialog click is too far
+        // removed from "the" user gesture for Safari to reliably allow it.
+        await drive.ensureAccessToken();
+
+        const ok = await confirmDialog({
+          title: "Restore from Drive?",
+          message: "This replaces everything currently in this app with your latest Drive backup. This can't be undone.",
+          confirmText: "Restore",
+          danger: true,
+        });
+        if (!ok) return;
+
+        btn.disabled = true;
+        btn.textContent = "Restoring...";
         const bytes = await drive.fetchBackupBytes();
         await db.importDatabaseBackup(bytes);
         showToast("Restored from Drive", "success");
         navigateTo("home");
       } catch (err) {
-        showToast(err.message || "Restore failed.", "error");
+        console.error("Restore from Drive failed:", err);
+        showToast((err && err.message) || "Restore failed.", "error");
         btn.disabled = false;
         btn.textContent = "Restore from Drive";
       }
@@ -191,14 +191,19 @@ export function renderHome(container, { navigateTo }) {
 
   const fileInput = container.querySelector("#import-file-input");
   container.querySelector("#import-backup").addEventListener("click", async () => {
-    if (blockIfUnfinishedSession(navigateTo)) return;
-    const ok = await confirmDialog({
-      title: "Import backup?",
-      message: "This replaces everything currently in this app with the contents of the backup file. This can't be undone.",
-      confirmText: "Choose File",
-      danger: true,
-    });
-    if (ok) fileInput.click();
+    try {
+      if (blockIfUnfinishedSession(navigateTo)) return;
+      const ok = await confirmDialog({
+        title: "Import backup?",
+        message: "This replaces everything currently in this app with the contents of the backup file. This can't be undone.",
+        confirmText: "Choose File",
+        danger: true,
+      });
+      if (ok) fileInput.click();
+    } catch (err) {
+      console.error("Import backup failed:", err);
+      showToast((err && err.message) || "Couldn't start the import.", "error");
+    }
   });
 
   fileInput.addEventListener("change", async () => {
