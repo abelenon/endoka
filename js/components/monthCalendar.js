@@ -3,10 +3,44 @@ import { openWorkoutDetail } from "./workoutDetail.js";
 
 const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
 
+const SWIPE_THRESHOLD_PX = 40;
+
 export function renderMonthCalendar(container) {
   const today = new Date();
   let year = today.getFullYear();
   let month = today.getMonth() + 1; // 1-12
+
+  // Swipe left/right to change months, matching the old Kivy app. Attached
+  // once to `container` itself (not re-attached per render() call, since
+  // only its innerHTML gets replaced each time, not the node). A tap stays
+  // a tap -- it moves well under the threshold -- so this doesn't fight
+  // with the day-dot buttons' own click handling, and `passive: true`
+  // means it never blocks the page's normal vertical scroll.
+  let touchStartX = null;
+  let touchStartY = null;
+  container.addEventListener(
+    "touchstart",
+    (e) => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    },
+    { passive: true }
+  );
+  container.addEventListener(
+    "touchend",
+    (e) => {
+      if (touchStartX === null) return;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      touchStartX = null;
+      touchStartY = null;
+      if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return;
+      if (dx < 0) nextMonth();
+      else prevMonth();
+    },
+    { passive: true }
+  );
 
   function isCurrentMonth() {
     return year === today.getFullYear() && month === today.getMonth() + 1;
