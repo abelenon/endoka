@@ -105,15 +105,21 @@ export function ensureAccessToken() {
 async function findBackupFileId() {
   if (cachedFileId) return cachedFileId;
   const query = encodeURIComponent(`name='${BACKUP_FILENAME}' and trashed=false`);
+  const orderBy = encodeURIComponent("modifiedTime desc");
   const response = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,modifiedTime)&orderBy=modifiedTime desc`,
+    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,modifiedTime)&orderBy=${orderBy}`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!response.ok) {
     throw new Error(`Drive search failed (${response.status})`);
   }
   const data = await response.json();
-  cachedFileId = data.files && data.files.length ? data.files[0].id : null;
+  const files = data.files || [];
+  // Sort client-side too, not just via the request's orderBy -- belt and
+  // suspenders against exactly the kind of silent mis-ordering that sent
+  // an older duplicate back instead of the newest one.
+  files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime));
+  cachedFileId = files.length ? files[0].id : null;
   return cachedFileId;
 }
 
