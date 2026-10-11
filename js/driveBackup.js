@@ -108,7 +108,7 @@ async function findBackupFileId() {
   const orderBy = encodeURIComponent("modifiedTime desc");
   const response = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,modifiedTime)&orderBy=${orderBy}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
   );
   if (!response.ok) {
     throw new Error(`Drive search failed (${response.status})`);
@@ -215,9 +215,17 @@ export async function fetchBackupBytes() {
     throw new Error("No backup found in Drive yet.");
   }
 
+  // cache: "no-store" matters a lot here specifically: backupNow() updates
+  // this same file ID in place on every backup, so this exact URL gets
+  // fetched over and over as the file's content keeps changing underneath
+  // it. Without this, the browser's ordinary HTTP cache can and will
+  // serve back whatever this URL returned the first time, regardless of
+  // what the file actually contains now -- "restored, but not the
+  // freshest" with no error, because nothing failed, it just never left
+  // the browser's cache.
   let response = await fetch(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
   );
 
   if (response.status === 401) {
@@ -225,7 +233,7 @@ export async function fetchBackupBytes() {
     await getAccessTokenInteractive();
     response = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
     );
   }
   if (!response.ok) {
