@@ -178,8 +178,37 @@ export function renderHome(container, { navigateTo }) {
       btn.disabled = true;
       btn.textContent = "Connecting...";
       try {
-        await drive.connectAndBackup(db.exportBytes());
-        showToast("Connected and backed up", "success");
+        // connect() only signs in and checks whether a backup already
+        // exists -- it never silently pushes local data over it. That's
+        // deliberate: a fresh browser/device's local data is usually
+        // empty, and auto-backing-up on connect is exactly what
+        // overwrote a real backup with nothing, twice, before this fix.
+        const foundExisting = await drive.connect();
+
+        if (foundExisting) {
+          btn.disabled = false;
+          btn.textContent = "Connect Drive";
+          if (blockIfUnfinishedSession(navigateTo)) return;
+
+          const restore = await confirmDialog({
+            title: "Existing Drive backup found",
+            message: "Restore it now? This replaces everything currently in this app. Skip this and your local data stays untouched.",
+            confirmText: "Restore",
+            danger: true,
+          });
+          if (restore) {
+            btn.disabled = true;
+            btn.textContent = "Restoring...";
+            const bytes = await drive.fetchBackupBytes();
+            await db.importDatabaseBackup(bytes);
+            showToast("Connected and restored from Drive", "success");
+          } else {
+            showToast("Connected to Drive", "success");
+          }
+        } else {
+          await drive.backupNow(db.exportBytes());
+          showToast("Connected and backed up", "success");
+        }
         navigateTo("home");
       } catch (err) {
         showToast(err.message || "Couldn't connect to Drive.", "error");

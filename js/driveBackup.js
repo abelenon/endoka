@@ -9,11 +9,25 @@ const CLIENT_ID = "133471136054-trpet0ap1k1sicn74cvgoa6t443k4er6.apps.googleuser
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const BACKUP_FILENAME = "endokalos-backup.db";
 
-const DRIVE_FILE_ID_KEY = "endokalos-drive-file-id";
+// Whether THIS browser has ever connected -- just a local convenience flag
+// for the UI ("show Connect vs show Back Up Now"), not the source of truth
+// for which Drive file is the backup. See findBackupFileId() below for why
+// that distinction matters.
+const DRIVE_CONNECTED_KEY = "endokalos-drive-connected";
 const LAST_BACKUP_KEY = "endokalos-drive-last-backup";
 
 let tokenClient = null;
 let accessToken = null; // in-memory only -- short-lived, never persisted
+
+// Resolved by searching Drive (see findBackupFileId), cached in memory only
+// for this page load -- never localStorage. Each browser/device used to
+// cache its own file ID in localStorage, which meant two different
+// browsers signed into the same Google account had no way of knowing they
+// should be looking at the same file: each one just created its own on
+// first connect, silently fragmenting into multiple backups. Searching
+// Drive by filename instead means any browser, on any device, finds the
+// one real file every time.
+let cachedFileId = null;
 
 function ensureTokenClient() {
   if (tokenClient) return tokenClient;
@@ -62,18 +76,11 @@ function getAccessTokenSilent() {
 /** Click-triggered use (Connect/Back Up Now/Restore) -- requests a token
  * with Google's adaptive prompt, which only shows a popup if actually
  * needed. Called directly, with no `await` (and so no real delay) before
- * it, specifically to stay inside the click's user-gesture window.
- *
- * Earlier this tried silent-first-with-a-timeout, then fell back to a
- * popup on failure. That's what caused "stuck on Backing up... forever"
- * on Safari: the few seconds spent waiting on the silent attempt used up
- * the user-gesture window, so by the time the interactive popup was
- * requested, Safari no longer considered it a direct result of the click
- * and silently blocked it -- no error, just an unresolved promise. Going
- * straight to the interactive request, synchronously-ish from the click,
- * keeps it inside that window so the popup is actually allowed to open.
- * A generous (not tiny) timeout is still here as a last-resort safety net
- * against a genuinely stuck popup, not as the primary mechanism. */
+ * it, specifically to stay inside the click's user-gesture window -- see
+ * git history for why chaining a silent-then-popup fallback here broke
+ * Safari specifically (the delay forfeits the gesture window). A generous
+ * timeout is still here as a last-resort safety net, not the primary
+ * mechanism. */
 function getAccessTokenInteractive() {
   if (accessToken) return Promise.resolve(accessToken);
   return withTimeout(
@@ -91,8 +98,27 @@ export function ensureAccessToken() {
   return getAccessTokenInteractive();
 }
 
+/** Searches Drive (not localStorage) for the backup file by name, so any
+ * browser/device finds the same one. If more than one exists -- leftover
+ * from before this fix -- picks the most recently modified and leaves the
+ * others alone rather than deleting anything automatically. */
+async function findBackupFileId() {
+  if (cachedFileId) return cachedFileId;
+  const query = encodeURIComponent(`name='${BACKUP_FILENAME}' and trashed=false`);
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,modifiedTime)&orderBy=modifiedTime desc`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!response.ok) {
+    throw new Error(`Drive search failed (${response.status})`);
+  }
+  const data = await response.json();
+  cachedFileId = data.files && data.files.length ? data.files[0].id : null;
+  return cachedFileId;
+}
+
 export function isConnected() {
-  return !!localStorage.getItem(DRIVE_FILE_ID_KEY);
+  return !!localStorage.getItem(DRIVE_CONNECTED_KEY);
 }
 
 export function lastBackupTime() {
@@ -100,12 +126,18 @@ export function lastBackupTime() {
   return iso ? new Date(iso) : null;
 }
 
-/** First-time connect: asks the user to grant access, then does an
- * initial backup immediately so "Connect" and "it's actually backed up"
- * happen together instead of leaving a connected-but-never-backed-up gap. */
-export async function connectAndBackup(dbBytes) {
+/** Signs in and checks whether a backup already exists in Drive, but does
+ * NOT decide what to do about it -- that's a UI decision (ask the user
+ * whether to restore it), which belongs in home.js, not here. Returns
+ * true if an existing backup was found. This replaces the old
+ * connectAndBackup(), which always pushed local data up immediately --
+ * exactly the mechanism that twice overwrote a real backup with an empty
+ * local database on a fresh browser/device. */
+export async function connect() {
   await requestAccessTokenRaw("consent");
-  await backupNow(dbBytes);
+  localStorage.setItem(DRIVE_CONNECTED_KEY, "true");
+  const fileId = await findBackupFileId();
+  return fileId != null;
 }
 
 /** Uploads the given SQLite bytes as the single rolling backup file --
@@ -119,7 +151,7 @@ export async function connectAndBackup(dbBytes) {
 export async function backupNow(dbBytes, { interactive = true } = {}) {
   await (interactive ? getAccessTokenInteractive() : getAccessTokenSilent());
 
-  const fileId = localStorage.getItem(DRIVE_FILE_ID_KEY);
+  const fileId = await findBackupFileId();
   const blob = new Blob([dbBytes], { type: "application/octet-stream" });
 
   let response;
@@ -162,20 +194,20 @@ export async function backupNow(dbBytes, { interactive = true } = {}) {
   }
 
   const data = await response.json();
-  if (!fileId) localStorage.setItem(DRIVE_FILE_ID_KEY, data.id);
+  if (!fileId) cachedFileId = data.id;
+  localStorage.setItem(DRIVE_CONNECTED_KEY, "true");
   localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
 }
 
 /** Downloads the current Drive backup file's bytes directly -- no file
  * picker, mirrors backupNow()'s "just talk to Drive" flow in reverse.
- * Only meaningful once connected (there's a file id to fetch). Always
- * click-triggered (the Restore button), so always interactive. */
+ * Always click-triggered (the Restore button), so always interactive. */
 export async function fetchBackupBytes() {
-  const fileId = localStorage.getItem(DRIVE_FILE_ID_KEY);
-  if (!fileId) {
-    throw new Error("Not connected to Drive yet.");
-  }
   await getAccessTokenInteractive();
+  const fileId = await findBackupFileId();
+  if (!fileId) {
+    throw new Error("No backup found in Drive yet.");
+  }
 
   let response = await fetch(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -201,6 +233,7 @@ export function disconnect() {
     window.google.accounts.oauth2.revoke(accessToken, () => {});
   }
   accessToken = null;
-  localStorage.removeItem(DRIVE_FILE_ID_KEY);
+  cachedFileId = null;
+  localStorage.removeItem(DRIVE_CONNECTED_KEY);
   localStorage.removeItem(LAST_BACKUP_KEY);
 }
